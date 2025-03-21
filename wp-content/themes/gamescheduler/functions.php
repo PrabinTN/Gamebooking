@@ -233,6 +233,11 @@ function playzone_add_game_meta_boxes() {
 }
 add_action('add_meta_boxes', 'playzone_add_game_meta_boxes');
 
+
+/**
+ * Render Fields for Game 
+ */
+
 function playzone_render_game_meta_box($post) {
     // Get previously saved meta values
     $game_price_adult = get_post_meta($post->ID, '_game_price_adult', true);
@@ -278,6 +283,10 @@ function playzone_render_game_meta_box($post) {
     <?php
 }
 
+
+/**
+ * Save Fields for Game 
+ */
 
 function playzone_save_game_meta($post_id) {
     if (!isset($_POST['playzone_game_nonce']) || !wp_verify_nonce($_POST['playzone_game_nonce'], 'playzone_game_details')) {
@@ -342,9 +351,9 @@ add_action('rest_api_init', function () {
 
 
 /**
- * REST API for Guest Selections
+ * REST API for Guest Selections 
  */
-// Register custom endpoint for guest details
+
 add_action('rest_api_init', function() {
     register_rest_route('playzone/v1', '/guest-selection/', [
         'methods' => 'POST',
@@ -353,7 +362,10 @@ add_action('rest_api_init', function() {
     ]);
 });
 
-// Handle guest selection and store it in session
+
+/**
+ * Handle guest selection and store it in session
+ */
 function handle_guest_selection(WP_REST_Request $request) {
     // Get the data from the request
     $data = $request->get_json_params();
@@ -396,7 +408,7 @@ function playzone_register_api_routes() {
     register_rest_route('playzone/v1', '/game-selection/', array(
         'methods' => 'POST',
         'callback' => 'playzone_handle_game_selection',
-        'permission_callback' => '__return_true', // Make sure to set permission checks properly
+        'permission_callback' => '__return_true', 
     ));
 }
 add_action('rest_api_init', 'playzone_register_api_routes');
@@ -426,7 +438,7 @@ function playzone_handle_game_selection(WP_REST_Request $request) {
 
 
 /**
- * Time Slot Validation on /booking Page
+ * Time Slot Validation on booking Page
  */
 
 function playzone_validate_booking(WP_REST_Request $request) {
@@ -512,7 +524,7 @@ add_action('rest_api_init', function () {
 
 
 /**
- * Handle Guest Selection on /guest Page
+ * Enqueue Scripts
  */
 
 function playzone_enqueue_scripts() {
@@ -584,80 +596,57 @@ add_action('wp_ajax_nopriv_save_game_mode_to_session', 'save_game_mode_to_sessio
 
 function create_booking_post_type() {
     register_post_type('bookings', [
-        'labels'      => [
-            'name'          => __('Bookings'),
-            'singular_name' => __('Booking'),
+        'labels' => [
+            'name' => 'Bookings',
+            'singular_name' => 'Booking',
         ],
-        'public'      => true,
+        'public' => true,
         'has_archive' => true,
-        'supports'    => ['title', 'editor'],
+        'supports' => ['title', 'custom-fields'],
     ]);
 }
 add_action('init', 'create_booking_post_type');
 
 
-// Register REST Route for Payment Session Creation
-add_action('rest_api_init', function () {
-    register_rest_route('booking/v1', '/create-payment-session', [
-        'methods' => 'POST',
-        'callback' => 'create_payment_session',
-    ]);
+add_action('rest_api_init', function() {
+    register_rest_route('custom/v1', '/payment/', array(
+        'methods'  => 'POST',
+        'callback' => 'handle_stripe_payment',
+        'permission_callback' => '__return_true'
+    ));
 });
 
-// Create Stripe Payment Session
-function create_payment_session(WP_REST_Request $request) {
-    $data = $request->get_json_params();
-
-    // Debug log to inspect received data
-    error_log('Received Data: ' . print_r($data, true));
-
-    if (empty($data['selected_products']) || empty($data['zone_times'])) {
-        return new WP_REST_Response(['error' => 'Missing required data'], 400);
-    }
+function handle_stripe_payment(WP_REST_Request $request) {
+    require_once __DIR__ . '/vendor/autoload.php'; // Add Stripe PHP library
 
     \Stripe\Stripe::setApiKey('sk_test_51R4a81Inize6Cwja5N24b3fIOTbkP9p14lozmdwA1nyjssNNpyA0jPTe0w7z1BIwfzoWFq3tc8eSPvyaItq6oyXh00PzLcUtEm');
+
+    $data = $request->get_json_params();
 
     try {
         $session = \Stripe\Checkout\Session::create([
             'payment_method_types' => ['card'],
-            'line_items' => generate_line_items($data['selected_products'], $data['zone_times']),
+            'line_items' => [[
+                'price_data' => [
+                    'currency' => 'usd',
+                    'product_data' => [
+                        'name' => 'Game Booking',
+                    ],
+                    'unit_amount' => intval($data['amount'] * 100),
+                ],
+                'quantity' => 1,
+            ]],
             'mode' => 'payment',
-            'success_url' => home_url('/payment-success?session_id={CHECKOUT_SESSION_ID}'),
-            'cancel_url' => home_url('/payment-cancel'),
+            'success_url' => site_url('/booking-confirmation/?session_id={CHECKOUT_SESSION_ID}'),
+            'cancel_url' => site_url('/booking/?payment_status=cancelled'),
         ]);
 
-        return new WP_REST_Response(['id' => $session->id], 200);
-    } catch (\Stripe\Exception\ApiErrorException $e) {
-        error_log('Stripe Error: ' . $e->getMessage()); // Debug Stripe errors
-        return new WP_REST_Response(['error' => $e->getMessage()], 400);
+        return rest_ensure_response(['id' => $session->id]);
+    } catch (\Exception $e) {
+        return rest_ensure_response(['error' => $e->getMessage()]);
     }
 }
 
-
-// Generate Line Items for Stripe Checkout
-function generate_line_items($selected_products, $zone_times) {
-    $line_items = [];
-
-    foreach ($selected_products as $game_id) {
-        $game_name = get_the_title($game_id); 
-        $price = get_post_meta($game_id, '_game_price', true); 
-
-        if (!$price || !$game_name) continue; // Skip invalid data
-
-        $line_items[] = [
-            'price_data' => [
-                'currency' => 'usd',
-                'product_data' => [
-                    'name' => $game_name,
-                ],
-                'unit_amount' => intval($price) * 100,  // Price in cents
-            ],
-            'quantity' => 1, 
-        ];
-    }
-
-    return $line_items;
-}
 
 
 // Create Booking Table

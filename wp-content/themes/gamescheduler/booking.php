@@ -55,7 +55,8 @@ $time_slots = generate_time_slots();
 
     <div class="payment-section text-center">
         <form id="paymentForm">
-            <button type="button" id="checkout-button" class="btn btn-primary">Proceed to Payment</button>
+            <button type="button" id="checkout-button" class="btn btn-primary" disabled>Proceed to Payment</button>
+
         </form>
     </div>
 </div>
@@ -164,33 +165,57 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 </script>
-
 <script src="https://js.stripe.com/v3/"></script>
 <script>
-document.getElementById("checkout-button").addEventListener("click", function() {
-   fetch("<?php echo site_url('/wp-json/booking/v1/create-payment-session'); ?>", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-        date: "<?php echo esc_html($booking_date); ?>",
-        selected_products: JSON.parse(sessionStorage.getItem('selected_games')) || [],
-        zone_times: JSON.parse(sessionStorage.getItem('selected_times')) || {}
-    })
-})
-    .then(response => response.json())
-    .then(session => {
-        if(session.id) {
-            var stripe = Stripe("<?php echo STRIPE_PUBLISHABLE_KEY; ?>");
-            stripe.redirectToCheckout({ sessionId: session.id });
-        } else {
-            alert("Error creating Stripe session. " + (session.error || "Please try again."));
-        }
-    })
-    .catch(error => {
-        console.error('Stripe session error:', error);
-        alert("Error creating Stripe session. Please try again.");
+document.getElementById('checkout-button').addEventListener('click', async function() {
+    const stripe = Stripe('pk_test_51R4a81Inize6CwjaDOokYNzvz055umsWpJtaZR15Wa0l9431xLetGkD6ePG7jha7QRA6tnHna9wEXiUMnDqOPJWj00yHzILTt8'); // Replace with your Stripe Publishable Key
+
+    const bookingData = {
+        amount: parseFloat(document.getElementById('totalPrice').innerText.replace('$', '')),
+        booking_date: '<?php echo esc_js($booking_date); ?>',
+        adults: <?php echo esc_js($adults); ?>,
+        kids: <?php echo esc_js($kids); ?>,
+        selected_games: JSON.parse(sessionStorage.getItem('selected_games')) || []
+    };
+
+    const response = await fetch('<?php echo site_url('/wp-json/custom/v1/payment'); ?>', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bookingData)
     });
+
+    const sessionData = await response.json();
+
+    if (sessionData.id) {
+        stripe.redirectToCheckout({ sessionId: sessionData.id });
+    } else {
+        alert('Error: ' + (sessionData.error || 'Failed to initiate payment.'));
+    }
+});
+
+
+</script>
+
+<script>
+    function validateSelections() {
+    const timeSlotSelects = document.querySelectorAll('.time-slot-select');
+    const checkoutButton = document.getElementById('checkout-button');
+
+    const allTimeSlotsSelected = [...timeSlotSelects].every(select => select.value !== '');
+    checkoutButton.disabled = !allTimeSlotsSelected;
+}
+
+// Attach validation check to each time slot selection
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.time-slot-select').forEach(select => {
+        select.addEventListener('change', validateSelections);
+    });
+
+    // Also check initially in case selections are pre-filled
+    validateSelections();
 });
 </script>
+
+
 
 <?php get_footer(); ?>
